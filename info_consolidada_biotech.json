@@ -1,0 +1,48 @@
+{
+  "metadata": {
+    "titulo": "Informe Consolidado Biotech",
+    "version": "1.0",
+    "fecha_creacion": "2024-01-15",
+    "autor": "Equipo de Investigación",
+    "descripcion": "Análisis completo del ecosistema biotech con aprendizajes clave y tendencias del sector"
+  },
+  "configuracion": {
+    "idioma": "es",
+    "moneda": "USD",
+    "region": "Global",
+    "categorias": [
+      "biotecnología",
+      "salud digital",
+      "medicina personalizada",
+      "terapias avanzadas"
+    ]
+  },
+  "autores": [
+    {
+      "nombre": "Dra. María González",
+      "afiliacion": "Instituto de Biotecnología",
+      "email": "m.gonzalez@instituto.edu",
+      "rol": "Investigadora Principal"
+    },
+    {
+      "nombre": "Dr. Carlos Rodríguez",
+      "afiliacion": "Universidad Tecnológica",
+      "email": "c.rodriguez@universidad.edu",
+      "rol": "Analista Senior"
+    }
+  ],
+  "aprendizajes": [],
+  "estadisticas": {
+    "total_capitulos": 0,
+    "total_insights": 0,
+    "total_tendencias": 0,
+    "ultima_actualizacion": null
+  },
+  "tags": [
+    "biotech",
+    "innovación",
+    "investigación",
+    "tendencias",
+    "análisis"
+  ]
+}
