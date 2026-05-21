@@ -902,18 +902,7 @@ def main():
         # Mostrar JSON directamente (sin expander, siempre visible)
         st.json(st.session_state.resultado_transformacion)
         
-# --- ENTRADA DE COMPATIBILIDAD PARA VERCEL SERVERLESS ---
-def handler(request):
-    """Punto de entrada ficticio para engañar al compilador de Vercel"""
-    return {
-        'statusCode': 200,
-        'body': 'Streamlit wrapper context.'
-    }
+        
 
-# Vercel inspecciona el archivo buscando esta variable exacta
-app = handler
-
-# El arranque principal solo debe llamar a tu función main()
-# Streamlit se encarga por sí solo del CLI cuando corres `streamlit run app.py`
 if __name__ == "__main__":
     main()
