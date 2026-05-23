@@ -1,908 +1,848 @@
 """
-Herramienta de Transformación de Datos (Conversor ETL) - Versión Simplificada
-==============================================================================
-Aplicación Streamlit para convertir archivos CSV jerárquicos a estructura JSON anidada.
-La plantilla JSON base está integrada directamente en el código.
-
-Instrucciones de uso:
-1. Ejecutar: streamlit run app.py
-2. Cargar el archivo CSV con los datos
-3. Hacer clic en "Procesar y Generar"
-4. Descargar el archivo JSON resultante
-
-Requisitos:
-- Python 3.8+
-- Streamlit
+Motor de Inyección y Consolidación de Datos sobre un Molde Maestro Rígido
+Aplicación Streamlit para procesamiento de archivos CSV/JSON y generación de reportes consolidados
 """
 
 import streamlit as st
 import json
 import csv
+import copy
 import re
 import io
-from typing import Dict, List, Any, Optional, Tuple
-from collections import defaultdict
-from datetime import datetime
+from typing import Dict, List, Any, Optional
 
+# =============================================================================
+# CONFIGURACIÓN DE LA PÁGINA
+# =============================================================================
+st.set_page_config(
+    page_title="Motor de Consolidación de Reportes Biotech",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# ============================================================================
-# CONFIGURACIÓN DE COLORES - PALETA UNIVERSIDAD ICESI
-# ============================================================================
-
-COLORES_ICESI = {
-    "azul_principal": "#325BBD",
-    "azul_oscuro_hover": "#23438C",
-    "blanco": "#FFFFFF",
-    "gris_estructura": "#8A8D8F",
-    "gris_claro_fondo": "#F8F9FA",
-    "verde_exito": "#28A745",
-    "rojo_error": "#DC3545",
-    "amarillo_info": "#FFC107"
-}
-
-
-# ============================================================================
-# ESTILOS CSS PERSONALIZADOS CON LA PALETA ICESI
-# ============================================================================
-
-def inyectar_estilos_css():
-    """Inyecta estilos CSS personalizados con la paleta de colores de la Universidad Icesi."""
-    
-    estilos = f"""
-    <style>
-    /* ========================================
-       VARIABLES DE COLORES - PALETA ICESI
-       ======================================== */
-    :root {{
-        --azul-icesi: {COLORES_ICESI['azul_principal']};
-        --azul-oscuro: {COLORES_ICESI['azul_oscuro_hover']};
-        --blanco: {COLORES_ICESI['blanco']};
-        --gris-estructura: {COLORES_ICESI['gris_estructura']};
-        --gris-claro: {COLORES_ICESI['gris_claro_fondo']};
-        --verde-exito: {COLORES_ICESI['verde_exito']};
-        --rojo-error: {COLORES_ICESI['rojo_error']};
-        --amarillo-info: {COLORES_ICESI['amarillo_info']};
-    }}
-    
-    /* ========================================
-       ESTILOS GENERALES
-       ======================================== */
-    .stApp {{
-        background-color: var(--blanco);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }}
-    
-    /* ========================================
-       ENCABEZADOS Y TÍTULOS
-       ======================================== */
-    h1, h2, h3, h4, h5, h6 {{
-        color: var(--azul-icesi) !important;
-        font-weight: 600;
-    }}
-    
-    .stTitle h1 {{
-        color: var(--azul-icesi) !important;
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-    }}
-    
-    /* ========================================
-       BARRA LATERAL (SIDEBAR)
-       ======================================== */
-    .stSidebar {{
-        background-color: var(--gris-claro);
-        border-right: 2px solid var(--gris-estructura);
-    }}
-    
-    .stSidebar h2, .stSidebar h3 {{
-        color: var(--azul-icesi) !important;
-        border-bottom: 2px solid var(--azul-icesi);
-        padding-bottom: 0.5rem;
-        margin-bottom: 1rem;
-    }}
-    
-    /* ========================================
-       BOTONES PERSONALIZADOS
-       ======================================== */
-    .stButton > button {{
-        background-color: var(--azul-icesi);
-        color: var(--blanco);
-        border: none;
-        border-radius: 8px;
-        padding: 12px 24px;
-        font-size: 16px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(50, 91, 189, 0.2);
-    }}
-    
-    .stButton > button:hover {{
-        background-color: var(--azul-oscuro);
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(35, 67, 140, 0.3);
-    }}
-    
-    .stButton > button:active {{
-        transform: translateY(0);
-    }}
-    
-    /* Botón de descarga */
-    .stDownloadButton > button {{
-        background-color: var(--verde-exito);
-        color: var(--blanco);
-        border: none;
-        border-radius: 8px;
-        padding: 12px 24px;
-        font-size: 16px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(40, 167, 69, 0.2);
-    }}
-    
-    .stDownloadButton > button:hover {{
-        background-color: #218838;
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(33, 136, 56, 0.3);
-    }}
-    
-    /* ========================================
-       CAMPOS DE CARGA DE ARCHIVOS
-       ======================================== */
-    .stFileUploader {{
-        border: 2px dashed var(--gris-estructura);
-        border-radius: 12px;
-        padding: 2rem;
-        background-color: var(--gris-claro);
-        transition: all 0.3s ease;
-    }}
-    
-    .stFileUploader:hover {{
-        border-color: var(--azul-icesi);
-        background-color: #F0F4FF;
-    }}
-    
-    .stFileUploader label {{
-        color: var(--azul-icesi);
-        font-weight: 600;
-    }}
-    
-    /* ========================================
-       TARJETAS Y CONTENEDORES
-       ======================================== */
-    .css-1r6slb0 {{
-        background-color: var(--blanco);
-        border: 1px solid var(--gris-estructura);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 8px rgba(138, 141, 143, 0.15);
-    }}
-    
-    /* ========================================
-       MÉTRICAS Y ESTADÍSTICAS
-       ======================================== */
-    .stMetric {{
-        background-color: var(--gris-claro);
-        border-left: 4px solid var(--azul-icesi);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }}
-    
-    .stMetricLabel {{
-        color: var(--gris-estructura);
-        font-size: 0.9rem;
-        font-weight: 600;
-    }}
-    
-    .stMetricValue {{
-        color: var(--azul-icesi);
-        font-size: 2rem;
-        font-weight: 700;
-    }}
-    
-    /* ========================================
-       MENSAJES DE ÉXITO Y ERROR
-       ======================================== */
-    .stSuccess {{
-        background-color: #D4EDDA;
-        border-left: 4px solid var(--verde-exito);
-        color: #155724;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-    }}
-    
-    .stError {{
-        background-color: #F8D7DA;
-        border-left: 4px solid var(--rojo-error);
-        color: #721C24;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-    }}
-    
-    .stInfo {{
-        background-color: #FFF3CD;
-        border-left: 4px solid var(--amarillo-info);
-        color: #856404;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-    }}
-    
-    /* ========================================
-       EXPANDERS (SECCIONES DESPLEGABLES)
-       ======================================== */
-    .streamlit-expanderHeader {{
-        background-color: var(--gris-claro);
-        border: 1px solid var(--gris-estructura);
-        border-radius: 8px;
-        padding: 1rem;
-        color: var(--azul-icesi);
-        font-weight: 600;
-    }}
-    
-    .streamlit-expanderHeader:hover {{
-        background-color: #E9ECEF;
-    }}
-    
-    .streamlit-expanderContent {{
-        background-color: var(--blanco);
-        border: 1px solid var(--gris-estructura);
-        border-top: none;
-        border-radius: 0 0 8px 8px;
-        padding: 1rem;
-    }}
-    
-    /* ========================================
-       DIVISORES
-       ======================================== */
-    hr {{
-        border: none;
-        height: 2px;
-        background: linear-gradient(to right, var(--azul-icesi), var(--gris-estructura));
-        margin: 2rem 0;
-    }}
-    
-    /* ========================================
-       TEXTO Y PÁRRAFOS
-       ======================================== */
-    p, li {{
-        color: #333333;
-        line-height: 1.6;
-    }}
-    
-    strong {{
-        color: var(--azul-icesi);
-    }}
-    
-    /* ========================================
-       TABLAS (para visualización JSON)
-       ======================================== */
-    .stJson table {{
-        border-collapse: collapse;
-        width: 100%;
-    }}
-    
-    .stJson th {{
-        background-color: var(--azul-icesi);
-        color: var(--blanco);
-        padding: 12px;
-        text-align: left;
-        font-weight: 600;
-    }}
-    
-    .stJson td {{
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--gris-claro);
-    }}
-    
-    .stJson tr:hover td {{
-        background-color: var(--gris-claro);
-    }}
-    
-    /* ========================================
-       SCROLLBAR PERSONALIZADO
-       ======================================== */
-    ::-webkit-scrollbar {{
-        width: 10px;
-        height: 10px;
-    }}
-    
-    ::-webkit-scrollbar-track {{
-        background: var(--gris-claro);
-    }}
-    
-    ::-webkit-scrollbar-thumb {{
-        background: var(--gris-estructura);
-        border-radius: 5px;
-    }}
-    
-    ::-webkit-scrollbar-thumb:hover {{
-        background: var(--azul-icesi);
-    }}
-    
-    /* ========================================
-       RESPONSIVE DESIGN
-       ======================================== */
-    @media (max-width: 768px) {{
-        .stTitle h1 {{
-            font-size: 2rem;
-        }}
-        
-        .stButton > button {{
-            width: 100%;
-            margin-bottom: 0.5rem;
-        }}
-        
-        .stMetric {{
-            margin-bottom: 1rem;
-        }}
-    }}
-    </style>
-    """
-    
-    st.markdown(estilos, unsafe_allow_html=True)
-
-
-# ============================================================================
-# PLANTILLA BASE JSON - INTEGRADA DIRECTAMENTE EN EL CÓDIGO
-# ============================================================================
-
-PLANTILLA_BASE_JSON = {
-    "metadata": {
-        "titulo": "Informe Consolidado Biotech",
+# =============================================================================
+# MOLDE MAESTRO INALTERABLE (BASE JSON)
+# =============================================================================
+MOLDE_MAESTRO: Dict[str, Any] = {
+    "portada": {
+        "titulo_principal": "Informe de Inteligencia Tecnológica: Biotecnología y Futuros Emergentes",
+        "subtitulo": "Análisis de Tendencias, Escenarios Plausibles y Recomendaciones Estratégicas",
         "version": "1.0",
-        "fecha_creacion": "2024-01-15",
-        "autor": "Equipo de Investigación",
-        "descripcion": "Análisis completo del ecosistema biotech con aprendizajes clave y tendencias del sector"
+        "fecha_publicacion": "2024",
+        "organizacion": "Centro de Estudios en Biotecnología y Futuros Estratégicos",
+        "autores": [
+            "Equipo de Inteligencia Tecnológica",
+            "Comité de Prospectiva Biotecnológica"
+        ],
+        "logo_url": "https://ejemplo.org/logo-biotech.png",
+        "color_corporativo": "#1a5276",
+        "idioma": "es"
     },
-    "configuracion": {
-        "idioma": "es",
-        "moneda": "USD",
-        "region": "Global",
-        "categorias": [
-            "biotecnología",
-            "salud digital",
-            "medicina personalizada",
-            "terapias avanzadas"
+    "tabla-contenidos": {
+        "secciones": [
+            {"orden": 1, "titulo": "Ficha Técnica", "pagina": 3},
+            {"orden": 2, "titulo": "Resumen Ejecutivo", "pagina": 4},
+            {"orden": 3, "titulo": "Introducción", "pagina": 6},
+            {"orden": 4, "titulo": "Aprendizajes e Insights por Capítulos", "pagina": 8},
+            {"orden": 5, "titulo": "Escenarios Plausibles", "pagina": 15},
+            {"orden": 6, "titulo": "Glosario de Términos", "pagina": 25},
+            {"orden": 7, "titulo": "Referencias y Scan Cards", "pagina": 28},
+            {"orden": 8, "titulo": "Anexos Metodológicos", "pagina": 32}
         ]
     },
-    "autores": [
-        {
-            "nombre": "Dra. María González",
-            "afiliacion": "Instituto de Biotecnología",
-            "email": "m.gonzalez@instituto.edu",
-            "rol": "Investigadora Principal"
-        },
-        {
-            "nombre": "Dr. Carlos Rodríguez",
-            "afiliacion": "Universidad Tecnológica",
-            "email": "c.rodriguez@universidad.edu",
-            "rol": "Analista Senior"
-        }
-    ],
-    "aprendizajes": [],
-    "estadisticas": {
-        "total_capitulos": 0,
-        "total_insights": 0,
-        "total_tendencias": 0,
-        "ultima_actualizacion": None
+    "ficha-tecnica-1": {
+        "titulo_documento": "Informe de Inteligencia Tecnológica en Biotecnología",
+        "tipo_documento": "Reporte de Prospectiva Tecnológica",
+        "alcance": "Global con énfasis en Latinoamérica",
+        "horizonte_temporal": "2024-2035",
+        "metodologia": "Análisis STEEP + prospectiva estratégica + revisión sistemática de literatura",
+        "fuentes_primarias": 150,
+        "fuentes_secundarias": 320,
+        "expertos_consultados": 45,
+        "fecha_elaboracion": "Enero - Marzo 2024",
+        "palabras_clave": [
+            "biotecnología",
+            "futuros emergentes",
+            "innovación disruptiva",
+            "análisis STEEP",
+            "escenarios plausibles",
+            "inteligencia tecnológica"
+        ]
     },
-    "tags": [
-        "biotech",
-        "innovación",
-        "investigación",
-        "tendencias",
-        "análisis"
-    ]
+    "resumen-ejecutivo": {
+        "introduccion": (
+            "Este informe presenta un análisis comprehensivo de las tendencias biotecnológicas "
+            "más relevantes que moldearán el panorama global en las próximas dos décadas. "
+            "A través de una metodología rigurosa que combina análisis STEEP (Social, Tecnológico, "
+            "Económico, Ambiental y Político) con técnicas de prospectiva estratégica, identificamos "
+            "los impulsores críticos de cambio y construimos escenarios plausibles que permiten a "
+            "tomadores de decisión anticipar y prepararse para futuros alternativos."
+        ),
+        "hallazgos_principales": [
+            {
+                "orden": 1,
+                "hallazgo": "La convergencia entre biotecnología, inteligencia artificial y nanotecnología está acelerando la innovación a ritmos sin precedentes",
+                "nivel_impacto": "Crítico",
+                "horizonte": "Corto-Mediano Plazo (2024-2028)"
+            },
+            {
+                "orden": 2,
+                "hallazgo": "Las tecnologías de edición genética CRISPR y sus derivados están democratizando el acceso a modificaciones genéticas",
+                "nivel_impacto": "Alto",
+                "horizonte": "Mediano Plazo (2026-2030)"
+            },
+            {
+                "orden": 3,
+                "hallazgo": "La biología sintética está emergiendo como plataforma transversal para múltiples industrias",
+                "nivel_impacto": "Alto",
+                "horizonte": "Mediano-Largo Plazo (2028-2035)"
+            },
+            {
+                "orden": 4,
+                "hallazgo": "Los marcos regulatorios globales enfrentan desafíos significativos para mantener el ritmo de la innovación biotecnológica",
+                "nivel_impacto": "Crítico",
+                "horizonte": "Continuo"
+            }
+        ],
+        "recomendaciones_estrategicas": [
+            {
+                "orden": 1,
+                "recomendacion": "Establecer comités de vigilancia tecnológica interdisciplinarios",
+                "prioridad": "Alta",
+                "responsable": "Dirección de I+D+i"
+            },
+            {
+                "orden": 2,
+                "recomendacion": "Desarrollar alianzas estratégicas con centros de investigación líderes",
+                "prioridad": "Alta",
+                "responsable": "Dirección de Alianzas"
+            },
+            {
+                "orden": 3,
+                "recomendacion": "Invertir en capacidades internas de biología sintética y análisis de datos ómicos",
+                "prioridad": "Media",
+                "responsable": "Dirección de Talento"
+            }
+        ]
+    },
+    "introduccion": {
+        "contexto_global": (
+            "El panorama biotecnológico global experimenta una transformación acelerada impulsada "
+            "por la convergencia de múltiples disciplinas científicas. La intersección entre "
+            "biología, computación, ingeniería y ciencias de materiales está generando oportunidades "
+            "sin precedentes para abordar desafíos en salud, agricultura, energía y sostenibilidad "
+            "ambiental. Este contexto de innovación disruptiva requiere marcos analíticos robustos "
+            "que permitan comprender las implicaciones estratégicas y construir capacidades de "
+            "respuesta ágiles y efectivas."
+        ),
+        "objetivos_documento": [
+            "Proporcionar un mapeo comprehensivo de las tendencias biotecnológicas emergentes",
+            "Construir escenarios plausibles que ilustren futuros alternativos para el sector",
+            "Identificar oportunidades y riesgos estratégicos para tomadores de decisión",
+            "Establecer recomendaciones accionables para el desarrollo de capacidades organizacionales",
+            "Documentar aprendizajes e insights derivados de análisis de casos y revisión de literatura"
+        ],
+        "alcance_limitaciones": {
+            "cobertura_geografica": "Global con profundidad en Norteamérica, Europa y Asia-Pacífico",
+            "sectores_incluidos": [
+                "Salud y medicina personalizada",
+                "Agricultura y seguridad alimentaria",
+                "Bioenergía y biocombustibles",
+                "Biomateriales y manufactura sostenible",
+                "Bioprocesos industriales"
+            ],
+            "limitaciones": [
+                "Rapidez del cambio tecnológico puede superar el ciclo de actualización del informe",
+                "Sesgo inherente hacia tecnologías con mayor visibilidad en literatura científica",
+                "Variabilidad regulatoria entre jurisdicciones dificulta generalizaciones"
+            ]
+        },
+        "estructura_documento": (
+            "El documento se organiza en siete secciones principales: (1) Ficha Técnica que "
+            "describe la metodología y alcance; (2) Resumen Ejecutivo con hallazgos clave; "
+            "(3) Introducción al contexto y objetivos; (4) Aprendizajes e Insights organizados "
+            "por capítulos temáticos; (5) Escenarios Plausibles construidos mediante metodología "
+            "STEEP; (6) Glosario de términos técnicos; y (7) Referencias y Scan Cards con "
+            "fuentes documentales detalladas."
+        )
+    },
+    "aprendizajes": [],
+    "escenarios": [],
+    "glosario": {
+        "terminos": [
+            {
+                "termino": "Biotecnología",
+                "definicion": "Uso de sistemas biológicos u organismos vivos para desarrollar o crear productos, a menudo combinando biología con tecnología.",
+                "categoria": "General"
+            },
+            {
+                "termino": "CRISPR-Cas9",
+                "definicion": "Sistema de edición genética que permite modificar secuencias de ADN de manera precisa, eficiente y flexible.",
+                "categoria": "Edición Genética"
+            },
+            {
+                "termino": "Biología Sintética",
+                "definicion": "Diseño y construcción de nuevos sistemas biológicos o rediseño de sistemas existentes para fines útiles.",
+                "categoria": "Biología Sintética"
+            },
+            {
+                "termino": "ómica",
+                "definicion": "Término colectivo para campos de estudio en biología que terminan en -ómica (genómica, proteómica, metabolómica).",
+                "categoria": "Análisis Molecular"
+            },
+            {
+                "termino": "Terapia Génica",
+                "definicion": "Técnica experimental que usa genes para tratar o prevenir enfermedades mediante la inserción de un gen en las células.",
+                "categoria": "Medicina"
+            },
+            {
+                "termino": "Biomarcador",
+                "definicion": "Indicador biológico medible que puede ser usado para evaluar procesos biológicos, condiciones patológicas o respuestas a intervenciones.",
+                "categoria": "Diagnóstico"
+            },
+            {
+                "termino": "Microbioma",
+                "definicion": "Conjunto de microorganismos (bacterias, arqueas, hongos, virus) que habitan en un ambiente particular, especialmente en el cuerpo humano.",
+                "categoria": "Microbiología"
+            },
+            {
+                "termino": "Bioinformática",
+                "definicion": "Campo interdisciplinario que desarrolla métodos y herramientas de software para comprender datos biológicos, especialmente grandes conjuntos de datos.",
+                "categoria": "Computación"
+            },
+            {
+                "termino": "Fermentación de Precisión",
+                "definicion": "Uso de microorganismos programados para producir compuestos específicos de manera eficiente y escalable.",
+                "categoria": "Bioprocesos"
+            },
+            {
+                "termino": "Órgano-en-un-chip",
+                "definicion": "Sistema microfluídico que simula las actividades, mecánicas y respuestas fisiológicas de órganos humanos.",
+                "categoria": "Modelado"
+            }
+        ]
+    },
+    "scan-cards": [],
+    "anexos": {
+        "metodologia_detallada": {
+            "enfoque_general": (
+                "La metodología empleada combina análisis STEEP estructurado con técnicas de "
+                "prospectiva estratégica y revisión sistemática de literatura científica y técnica. "
+                "El proceso incluyó: (1) Búsqueda y filtrado de fuentes primarias y secundarias; "
+                "(2) Codificación y categorización temática; (3) Identificación de patrones y "
+                "tendencias emergentes; (4) Construcción de escenarios mediante análisis de "
+                "incertidumbres críticas; (5) Validación con panel de expertos."
+            ),
+            "criterios_inclusion": [
+                "Publicaciones de los últimos 10 años (2014-2024)",
+                "Fuentes revisadas por pares o informes de organizaciones reconocidas",
+                "Enfoque en aplicaciones biotecnológicas con potencial de impacto significativo",
+                "Disponibilidad de datos verificables y metodología transparente"
+            ],
+            "fuentes_datos": [
+                "Bases de datos científicas (PubMed, Scopus, Web of Science)",
+                "Repositorios de patentes (USPTO, EPO, WIPO)",
+                "Informes de inteligencia de mercado (CB Insights, PitchBook)",
+                "Publicaciones de agencias gubernamentales y organismos internacionales"
+            ]
+        },
+        "matriz_steeP": {
+            "social": {
+                "descripcion": "Factores demográficos, culturales, éticos y de aceptación pública",
+                "dimensiones": [
+                    "Percepción pública de tecnologías biotecnológicas",
+                    "Consideraciones éticas y bioéticas",
+                    "Equidad en acceso a beneficios biotecnológicos",
+                    "Cambios demográficos y necesidades de salud"
+                ]
+            },
+            "tecnologico": {
+                "descripcion": "Avances científicos, convergencia tecnológica y capacidades emergentes",
+                "dimensiones": [
+                    "Tasas de innovación y ciclos de desarrollo",
+                    "Convergencia interdisciplinaria",
+                    "Infraestructura de investigación y desarrollo",
+                    "Madurez tecnológica (TRL) de innovaciones clave"
+                ]
+            },
+            "economico": {
+                "descripcion": "Mercados, inversiones, modelos de negocio y competitividad",
+                "dimensiones": [
+                    "Tamaño y crecimiento de mercados biotecnológicos",
+                    "Flujos de inversión en I+D biotecnológica",
+                    "Modelos de negocio emergentes",
+                    "Cadenas de valor y ecosistemas de innovación"
+                ]
+            },
+            "ambiental": {
+                "descripcion": "Sostenibilidad, impacto ecológico y economía circular",
+                "dimensiones": [
+                    "Contribución a objetivos de sostenibilidad",
+                    "Huella ambiental de procesos biotecnológicos",
+                    "Aplicaciones en remediación y conservación",
+                    "Economía circular y bioeconomía"
+                ]
+            },
+            "politico": {
+                "descripcion": "Marcos regulatorios, políticas públicas y gobernanza",
+                "dimensiones": [
+                    "Regulaciones de bioseguridad y biotecnología",
+                    "Políticas de fomento a la innovación",
+                    "Acuerdos internacionales y estándares",
+                    "Gobernanza de tecnologías emergentes"
+                ]
+            }
+        }
+    },
+    "metadata": {
+        "fecha_generacion": "2024-03-15",
+        "version_esquema": "2.1",
+        "autor_esquema": "Centro de Estudios en Biotecnología y Futuros Estratégicos",
+        "licencia": "CC BY-NC-SA 4.0",
+        "contacto": "info@cebfe.org",
+        "sitio_web": "https://www.cebfe.org"
+    }
 }
 
 
-# ============================================================================
-# FUNCIONES DE PROCESAMIENTO DE DATOS
-# ============================================================================
+# =============================================================================
+# FUNCIONES DE PROCESAMIENTO
+# =============================================================================
 
-def extraer_numero(texto: str) -> Optional[int]:
+def procesar_archivo(apoyo_archivo, tipo_archivo: str) -> Optional[Any]:
     """
-    Extrae el primer número entero encontrado en una cadena de texto.
+    Procesa un archivo subido (CSV o JSON) y retorna su contenido estructurado.
     
     Args:
-        texto: Cadena de texto donde buscar el número
-        
+        apoyo_archivo: Objeto UploadedFile de Streamlit
+        tipo_archivo: Extensión del archivo ('csv' o 'json')
+    
     Returns:
-        El número entero encontrado o None si no hay número
+        Contenido procesado del archivo o None si hay error
     """
-    numeros = re.findall(r'\d+', texto)
-    return int(numeros[0]) if numeros else None
-
-
-def clasificar_subseccion(subseccion: str) -> Tuple[str, Optional[int], str]:
-    """
-    Clasifica el tipo de subsección y extrae información relevante.
-    
-    Args:
-        subseccion: Nombre de la subsección a clasificar
-        
-    Returns:
-        Tupla con (tipo, indice, subtipo) donde:
-        - tipo: 'titulo', 'subtitulo', 'parrafo', 'scan_cards', 'insight', 'tendencia', 'quote', 'autor', 'otro'
-        - indice: Número asociado (para insights/tendencias) o None
-        - subtipo: Detalle adicional del mapeo
-    """
-    subseccion_lower = subseccion.lower().strip()
-    
-    # Verificar si es insight (debe verificarse antes que "título" para evitar falsos positivos)
-    if 'insight' in subseccion_lower:
-        indice = extraer_numero(subseccion_lower)
-        if 'título' in subseccion_lower or 'titulo' in subseccion_lower:
-            return ('insight', indice, 'titulo')
-        elif 'frase de cierre' in subseccion_lower:
-            return ('insight', indice, 'frase_cierre')
-        elif 'quote' in subseccion_lower:
-            return ('quote', indice, 'texto')
-        elif 'autor' in subseccion_lower or 'afiliación' in subseccion_lower or 'afiliacion' in subseccion_lower:
-            return ('autor', indice, 'afiliacion' if 'afiliacion' in subseccion_lower or 'afiliación' in subseccion_lower else 'autor')
-        else:
-            return ('insight', indice, 'contenido')
-    
-    # Verificar si es tendencia
-    if 'tendencia' in subseccion_lower:
-        indice = extraer_numero(subseccion_lower)
-        if 'nombre' in subseccion_lower:
-            return ('tendencia', indice, 'nombre')
-        elif 'explicación' in subseccion_lower or 'explicacion' in subseccion_lower:
-            return ('tendencia', indice, 'explicacion')
-        elif 'frase cuantitativa' in subseccion_lower:
-            return ('tendencia', indice, 'frase_cuantitativa')
-        elif 'implicación' in subseccion_lower or 'implicacion' in subseccion_lower:
-            return ('tendencia', indice, 'implicacion_estrategica')
-        else:
-            return ('tendencia', indice, 'explicacion')  # Por defecto
-    
-    # Verificar otros tipos
-    if 'título' in subseccion_lower or 'titulo' in subseccion_lower:
-        return ('titulo', None, 'titulo')
-    elif 'subtítulo' in subseccion_lower or 'subtitulo' in subseccion_lower:
-        return ('subtitulo', None, 'subtitulo')
-    elif 'párrafo explicativo' in subseccion_lower or 'parrafo explicativo' in subseccion_lower:
-        return ('parrafo', None, 'parrafo_explicativo')
-    elif 'scan cards' in subseccion_lower:
-        return ('scan_cards', None, 'scan_cards')
-    else:
-        return ('otro', None, subseccion_lower)
-
-
-def procesar_csv(csv_content: str) -> Dict[str, Any]:
-    """
-    Procesa el contenido del CSV y lo organiza en una estructura jerárquica.
-    
-    Args:
-        csv_content: Contenido del archivo CSV como string
-        
-    Returns:
-        Diccionario con la estructura de capítulos, insights y tendencias
-    """
-    # Leer CSV con encoding utf-8-sig para manejar BOM
-    lector = csv.DictReader(io.StringIO(csv_content), delimiter=',')
-    
-    # Estructura temporal para almacenar datos
-    capitulos_data = defaultdict(lambda: {
-        'titulo': '',
-        'subtitulo': '',
-        'parrafo_explicativo': '',
-        'scan_cards': [],
-        'insights': defaultdict(lambda: {
-            'titulo': '',
-            'contenido': '',
-            'frase_cierre': '',
-            'quote': {'texto': '', 'autor': '', 'afiliacion': ''}
-        }),
-        'tendencias': defaultdict(lambda: {
-            'nombre': '',
-            'explicacion': '',
-            'frase_cuantitativa': '',
-            'implicacion_estrategica': ''
-        })
-    })
-    
-    # Procesar cada fila
-    for fila in lector:
-        # Validar que existan las columnas necesarias
-        if 'Capitulo' not in fila or 'subsección' not in fila or 'Contenido_Generado' not in fila:
-            continue
-        
-        nombre_capitulo = fila['Capitulo'].strip()
-        subseccion = fila['subsección'].strip()
-        contenido = fila['Contenido_Generado'].strip()
-        
-        # Extraer número del capítulo para ordenamiento
-        num_capitulo = extraer_numero(nombre_capitulo)
-        if num_capitulo is None:
-            continue
-        
-        # Clasificar la subsección
-        tipo, indice, subtipo = clasificar_subseccion(subseccion)
-        
-        # Asignar contenido según el tipo
-        capitulo = capitulos_data[num_capitulo]
-        capitulo['nombre_original'] = nombre_capitulo
-        
-        if tipo == 'titulo':
-            capitulo['titulo'] = contenido
-        elif tipo == 'subtitulo':
-            capitulo['subtitulo'] = contenido
-        elif tipo == 'parrafo':
-            capitulo['parrafo_explicativo'] = contenido
-        elif tipo == 'scan_cards':
-            # Separar por comas y limpiar espacios
-            scan_cards_lista = [item.strip() for item in contenido.split(',')]
-            capitulo['scan_cards'] = scan_cards_lista
-        elif tipo == 'insight' and indice is not None:
-            insight = capitulo['insights'][indice]
-            if subtipo == 'titulo':
-                insight['titulo'] = contenido
-            elif subtipo == 'contenido':
-                insight['contenido'] = contenido
-            elif subtipo == 'frase_cierre':
-                insight['frase_cierre'] = contenido
-        elif tipo == 'quote' and indice is not None:
-            insight = capitulo['insights'][indice]
-            insight['quote']['texto'] = contenido
-        elif tipo == 'autor' and indice is not None:
-            insight = capitulo['insights'][indice]
-            # Separar autor y afiliación si hay coma
-            if ',' in contenido:
-                partes = contenido.split(',', 1)
-                insight['quote']['autor'] = partes[0].strip()
-                insight['quote']['afiliacion'] = partes[1].strip()
+    try:
+        if tipo_archivo == 'json':
+            return json.load(apoyo_archivo)
+        elif tipo_archivo == 'csv':
+            # Intentar detectar el delimitador
+            contenido = apoyo_archivo.getvalue().decode('utf-8-sig')
+            primer_linea = contenido.split('\n')[0]
+            
+            if ';' in primer_linea and ',' not in primer_linea:
+                delimitador = ';'
             else:
-                if subtipo == 'autor':
-                    insight['quote']['autor'] = contenido
-                else:
-                    insight['quote']['afiliacion'] = contenido
-        elif tipo == 'tendencia' and indice is not None:
-            tendencia = capitulo['tendencias'][indice]
-            if subtipo == 'nombre':
-                tendencia['nombre'] = contenido
-            elif subtipo == 'explicacion':
-                tendencia['explicacion'] = contenido
-            elif subtipo == 'frase_cuantitativa':
-                tendencia['frase_cuantitativa'] = contenido
-            elif subtipo == 'implicacion_estrategica':
-                tendencia['implicacion_estrategica'] = contenido
+                delimitador = ','
+            
+            reader = csv.DictReader(io.StringIO(contenido), delimiter=delimitador)
+            return list(reader)
+    except Exception as e:
+        st.error(f"Error procesando archivo: {str(e)}")
+        return None
     
-    return dict(capitulos_data)
+    return None
 
 
-def construir_estructura_aprendizajes(capitulos_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def procesar_modulo_aprendizajes(datos) -> List[Dict[str, Any]]:
     """
-    Construye la estructura final de aprendizajes lista para inyectar en el JSON.
+    Procesa los datos del Módulo 1 (Aprendizajes e Insights).
+    
+    Si los datos son JSON, los retorna directamente.
+    Si son CSV, agrupa por Capítulo y estructura jerárquicamente.
     
     Args:
-        capitulos_data: Diccionario con los datos procesados de capítulos
-        
+        datos: Lista de registros (desde CSV) o diccionario (desde JSON)
+    
     Returns:
-        Lista de objetos capítulo con su estructura completa
+        Lista de objetos de aprendizajes estructurados
     """
-    aprendizajes = []
+    if isinstance(datos, dict):
+        # Ya viene como JSON estructurado
+        return datos.get("aprendizajes", datos if isinstance(datos, list) else [datos])
     
-    # Ordenar capítulos por número
-    capitulos_ordenados = sorted(capitulos_data.items(), key=lambda x: x[0])
+    if not isinstance(datos, list) or len(datos) == 0:
+        return []
     
-    for num_capitulo, datos in capitulos_ordenados:
-        capitulo_obj = {
-            'capitulo': num_capitulo,
-            'titulo': datos.get('titulo', ''),
-            'subtitulo': datos.get('subtitulo', ''),
-            'parrafo_explicativo': datos.get('parrafo_explicativo', ''),
-            'scan_cards': datos.get('scan_cards', [])
+    # Procesamiento de CSV - Agrupar por Capítulo
+    capitulos_dict: Dict[str, Dict[str, Any]] = {}
+    
+    for fila in datos:
+        nombre_capitulo = fila.get('Capitulo', fila.get('capitulo', 'Sin Capítulo'))
+        seccion = fila.get('sección', fila.get('seccion', fila.get('Sección', 'general'))).strip().lower()
+        
+        if nombre_capitulo not in capitulos_dict:
+            capitulos_dict[nombre_capitulo] = {
+                "nombre_capitulo": nombre_capitulo,
+                "insights": [],
+                "tendencias": []
+            }
+        
+        # Crear objeto de insight/tendencia basado en la sección
+        item = {
+            "titulo": fila.get('titulo', fila.get('Título', fila.get('Title', ''))),
+            "descripcion": fila.get('descripcion', fila.get('Descripción', fila.get('Description', ''))),
+            "nivel_impacto": fila.get('nivel_impacto', fila.get('Nivel_Impacto', 'Medio')),
+            "horizonte_temporal": fila.get('horizonte', fila.get('Horizonte', fila.get('Horizonte_Temporal', ''))),
+            "evidencia": fila.get('evidencia', fila.get('Evidencia', '')),
+            "fuentes": fila.get('fuentes', fila.get('Fuentes', ''))
         }
         
-        # Procesar insights
-        insights_lista = []
-        insights_data = datos.get('insights', {})
-        if insights_data:
-            # Ordenar insights por índice
-            insights_ordenados = sorted(insights_data.items(), key=lambda x: x[0])
-            for idx_insight, insight_datos in insights_ordenados:
-                insight_obj = {
-                    'numero': idx_insight,
-                    'titulo': insight_datos.get('titulo', ''),
-                    'contenido': insight_datos.get('contenido', ''),
-                    'frase_cierre': insight_datos.get('frase_cierre', '')
-                }
-                
-                # Agregar quote si existe información
-                quote_data = insight_datos.get('quote', {})
-                if quote_data and (quote_data.get('texto') or quote_data.get('autor') or quote_data.get('afiliacion')):
-                    insight_obj['quote'] = {
-                        'texto': quote_data.get('texto', ''),
-                        'autor': quote_data.get('autor', ''),
-                        'afiliacion': quote_data.get('afiliacion', '')
-                    }
-                
-                insights_lista.append(insight_obj)
-        
-        capitulo_obj['insights'] = insights_lista
-        
-        # Procesar tendencias
-        tendencias_lista = []
-        tendencias_data = datos.get('tendencias', {})
-        if tendencias_data:
-            # Ordenar tendencias por índice
-            tendencias_ordenadas = sorted(tendencias_data.items(), key=lambda x: x[0])
-            for idx_tendencia, tendencia_datos in tendencias_ordenadas:
-                tendencia_obj = {
-                    'numero': idx_tendencia,
-                    'nombre': tendencia_datos.get('nombre', ''),
-                    'explicacion': tendencia_datos.get('explicacion', ''),
-                    'frase_cuantitativa': tendencia_datos.get('frase_cuantitativa', ''),
-                    'implicacion_estrategica': tendencia_datos.get('implicacion_estrategica', '')
-                }
-                tendencias_lista.append(tendencia_obj)
-        
-        capitulo_obj['tendencias'] = tendencias_lista
-        aprendizajes.append(capitulo_obj)
+        # Clasificar según la sección
+        if 'insight' in seccion or seccion == 'general':
+            capitulos_dict[nombre_capitulo]["insights"].append(item)
+        elif 'tendencia' in seccion:
+            capitulos_dict[nombre_capitulo]["tendencias"].append(item)
+        else:
+            # Por defecto, agregar a insights
+            capitulos_dict[nombre_capitulo]["insights"].append(item)
     
-    return aprendizajes
+    # Convertir a lista
+    resultados = []
+    for capitulo_data in capitulos_dict.values():
+        # Filtrar listas vacías
+        if capitulo_data["insights"] or capitulo_data["tendencias"]:
+            resultados.append(capitulo_data)
+    
+    return resultados
 
 
-def inyectar_en_plantilla(plantilla_json: Dict[str, Any], aprendizajes: List[Dict[str, Any]]) -> Dict[str, Any]:
+def procesar_modulo_escenarios(datos) -> List[Dict[str, Any]]:
     """
-    Inyecta la estructura de aprendizajes en la plantilla JSON base.
+    Procesa los datos del Módulo 2 (Escenarios Plausibles).
+    
+    Si los datos son JSON, los retorna directamente.
+    Si son CSV, mapea columnas y parsea línea de tiempo y STEEP.
     
     Args:
-        plantilla_json: Diccionario con la plantilla JSON base
-        aprendizajes: Lista de objetos capítulo procesados
-        
+        datos: Lista de registros (desde CSV) o diccionario (desde JSON)
+    
     Returns:
-        Diccionario JSON con los aprendizajes inyectados
+        Lista de objetos de escenarios estructurados
     """
-    # Crear una copia profunda para no modificar el original
-    resultado = json.loads(json.dumps(plantilla_json))
+    if isinstance(datos, dict):
+        # Ya viene como JSON estructurado
+        return datos.get("escenarios", datos if isinstance(datos, list) else [datos])
     
-    # Inyectar o reemplazar únicamente la propiedad "aprendizajes"
-    resultado['aprendizajes'] = aprendizajes
+    if not isinstance(datos, list) or len(datos) == 0:
+        return []
     
-    # Actualizar estadísticas
-    resultado['estadisticas']['total_capitulos'] = len(aprendizajes)
-    resultado['estadisticas']['total_insights'] = sum(len(cap.get('insights', [])) for cap in aprendizajes)
-    resultado['estadisticas']['total_tendencias'] = sum(len(cap.get('tendencias', [])) for cap in aprendizajes)
-    resultado['estadisticas']['ultima_actualizacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    escenarios = []
+    
+    for fila in datos:
+        escenario = {
+            "titulo": fila.get('Nombre y Título Evocador', fila.get('titulo', fila.get('Título', ''))),
+            "descripcion_corta": fila.get('descripcion', fila.get('Descripcion', fila.get('Descripción', ''))),
+            "secciones": {},
+            "linea_tiempo": {},
+            "end_state": {}
+        }
+        
+        # Mapear columnas de texto largo a secciones en snake_case
+        columnas_secciones = {
+            'logica_del_escenario': ['Logica_del_escenario', 'Lógica_del_escenario', 'logica_escenario', 'lógica_escenario'],
+            'elementos_predeterminados': ['Elementos_predeterminados', 'Elementos_predeterminados', 'elementos_predeterminados'],
+            'narrativa_experiencial': ['Narrativa_experiencial', 'Narrativa_experiencial', 'narrativa_experiencial'],
+            'implicaciones_estrategicas': ['Implicaciones_estrategicas', 'Implicaciones_estratégicas', 'implicaciones_estratégicas']
+        }
+        
+        for clave_seccion, posibles_nombres in columnas_secciones.items():
+            for nombre in posibles_nombres:
+                if nombre in fila and fila[nombre]:
+                    escenario["secciones"][clave_seccion] = fila[nombre]
+                    break
+        
+        # Parsear línea de tiempo
+        columna_timeline = fila.get('Mapa_historia_linea_tiempo', fila.get('Línea_de_tiempo', fila.get('linea_tiempo', '')))
+        if columna_timeline:
+            escenario["linea_tiempo"] = parsear_linea_tiempo(columna_timeline)
+        
+        # Parsear estado final STEEP
+        columna_end_state = fila.get('Estado_final', fila.get('End_state', fila.get('estado_final', '')))
+        if columna_end_state:
+            escenario["end_state"] = parsear_steep(columna_end_state)
+        
+        escenarios.append(escenario)
+    
+    return escenarios
+
+
+def parsear_linea_tiempo(texto: str) -> Dict[str, str]:
+    """
+    Parsea el texto de línea de tiempo extrayendo rangos de años.
+    
+    Args:
+        texto: Texto conteniendo rangos de años y descripciones
+    
+    Returns:
+        Diccionario con rangos de años como claves
+    """
+    resultado = {}
+    
+    # Patrón para encontrar rangos de años (ej: 2026-2027, 2028-2030)
+    patron_rango = r'(\d{4})\s*-\s*(\d{4})'
+    # Patrón para año individual
+    patron_anio = r'(\d{4})'
+    
+    lineas = texto.split('\n') if '\n' in texto else [texto]
+    
+    for linea in lineas:
+        linea = linea.strip()
+        if not linea:
+            continue
+        
+        # Buscar rango de años
+        match_rango = re.search(patron_rango, linea)
+        if match_rango:
+            anio_inicio = match_rango.group(1)
+            anio_fin = match_rango.group(2)
+            clave = f"{anio_inicio}-{anio_fin}"
+            
+            # Extraer texto descriptivo (lo que no es el rango de años)
+            descripcion = re.sub(patron_rango, '', linea).strip().strip(':').strip('-').strip()
+            
+            if clave not in resultado:
+                resultado[clave] = descripcion
+            else:
+                resultado[clave] += " " + descripcion if descripcion else ""
+            continue
+        
+        # Buscar año individual
+        match_anio = re.search(patron_anio, linea)
+        if match_anio:
+            anio = match_anio.group(1)
+            descripcion = re.sub(patron_anio, '', linea).strip().strip(':').strip('-').strip()
+            
+            if anio not in resultado:
+                resultado[anio] = descripcion
+            else:
+                resultado[anio] += " " + descripcion if descripcion else ""
+    
+    # El último elemento se considera estado_final
+    if resultado:
+        ultima_clave = list(resultado.keys())[-1]
+        resultado["estado_final"] = resultado.pop(ultima_clave) if ultima_clave != "estado_final" else resultado["estado_final"]
     
     return resultado
 
 
-# ============================================================================
-# INTERFAZ DE USUARIO STREAMLIT
-# ============================================================================
+def parsear_steep(texto: str) -> Dict[str, str]:
+    """
+    Parsea el texto de estado final identificando categorías STEEP.
+    
+    Args:
+        texto: Texto conteniendo viñetas o palabras clave STEEP
+    
+    Returns:
+        Diccionario con categorías STEEP como claves
+    """
+    resultado = {}
+    
+    categorias_steep = {
+        'social': [r'\b[Ss]ocial\b', r'\b[Ss]ociedad\b', r'\b[Dd]emográfico\b', r'\b[Cc]ultural\b', r'\b[Éé]tico\b'],
+        'tecnologico': [r'\b[Tt]ecnológico\b', r'\b[Tt]ecnologia\b', r'\b[Tt]ecnología\b', r'\b[Ii]nnovación\b', r'\b[Ii]nnovacion\b'],
+        'economico': [r'\b[Ee]conómico\b', r'\b[Ee]conomia\b', r'\b[Ee]conomía\b', r'\b[Mm]ercado\b', r'\b[Ii]nversión\b'],
+        'ambiental': [r'\b[Aa]mbiental\b', r'\b[Ee]cológico\b', r'\b[Ee]cologico\b', r'\b[Ss]ostenible\b', r'\b[Ss]ustentable\b'],
+        'politico': [r'\b[Pp]olítico\b', r'\b[Pp]olitico\b', r'\b[Rr]egulatorio\b', r'\b[Rr]egulación\b', r'\b[Gg]obernanza\b']
+    }
+    
+    # Dividir por viñetas comunes
+    separadores = ['\n', '•', '●', '○', '▪', '▸', '-', '*']
+    segmentos = [texto]
+    
+    for sep in separadores:
+        nuevos_segmentos = []
+        for seg in segmentos:
+            nuevos_segmentos.extend(seg.split(sep))
+        segmentos = nuevos_segmentos
+    
+    for segmento in segmentos:
+        segmento = segmento.strip()
+        if not segmento:
+            continue
+        
+        # Identificar categoría STEEP
+        categoria_encontrada = None
+        for categoria, patrones in categorias_steep.items():
+            for patron in patrones:
+                if re.search(patron, segmento):
+                    categoria_encontrada = categoria
+                    break
+            if categoria_encontrada:
+                break
+        
+        if categoria_encontrada:
+            if categoria_encontrada not in resultado:
+                resultado[categoria_encontrada] = segmento
+            else:
+                resultado[categoria_encontrada] += " " + segmento
+        else:
+            # Si no se identifica categoría, agregar a 'otros'
+            if 'otros' not in resultado:
+                resultado['otros'] = segmento
+            else:
+                resultado['otros'] += " " + segmento
+    
+    return resultado
 
-def main():
-    """Función principal de la aplicación Streamlit."""
+
+def procesar_modulo_scan_cards(datos) -> List[Dict[str, Any]]:
+    """
+    Procesa los datos del Módulo 3 (Scan Cards / Documentos).
     
-    # Configuración de la página
-    st.set_page_config(
-        page_title="Conversor ETL - CSV a JSON",
-        page_icon="🔄",
-        layout="wide",
-        initial_sidebar_state="expanded"
+    Si los datos son JSON, los retorna directamente.
+    Si son CSV, transforma cada fila en objeto plano.
+    
+    Args:
+        datos: Lista de registros (desde CSV) o diccionario (desde JSON)
+    
+    Returns:
+        Lista de objetos de scan cards estructurados
+    """
+    if isinstance(datos, dict):
+        # Ya viene como JSON estructurado
+        return datos.get("scan-cards", datos.get("scan_cards", datos if isinstance(datos, list) else [datos]))
+    
+    if not isinstance(datos, list) or len(datos) == 0:
+        return []
+    
+    scan_cards = []
+    
+    # Mapeo de posibles nombres de columnas
+    mapeo_columnas = {
+        'id': ['ID', 'id', 'Id', 'Código', 'codigo', 'Código_ID'],
+        'calidad': ['Calidad', 'calidad', 'Quality', 'quality', 'Nivel_Calidad'],
+        'titulo': ['Title', 'title', 'Título', 'titulo', 'Titulo', 'Título_Documento'],
+        'anio': ['Year', 'year', 'Año', 'anio', 'Año_Publicacion', 'Fecha'],
+        'fuente': ['Source', 'source', 'Fuente', 'fuente', 'Origen', 'Publicacion'],
+        'autores': ['Authors', 'authors', 'Autores', 'autores', 'Autor', 'Autoría'],
+        'resumen': ['Abstract', 'abstract', 'Resumen', 'resumen', 'Descripción', 'descripcion']
+    }
+    
+    for fila in datos:
+        scan_card = {}
+        
+        for clave, posibles_nombres in mapeo_columnas.items():
+            valor = None
+            for nombre in posibles_nombres:
+                if nombre in fila:
+                    valor = fila[nombre]
+                    break
+            
+            # Limpiar valor si existe
+            if valor is not None:
+                valor = str(valor).strip()
+                if valor:
+                    scan_card[clave] = valor
+        
+        # Agregar campos adicionales no mapeados
+        for clave_fila, valor_fila in fila.items():
+            if clave_fila not in [n for nombres in mapeo_columnas.values() for n in nombres]:
+                valor = str(valor_fila).strip() if valor_fila else ''
+                if valor:
+                    scan_card[clave_fila] = valor
+        
+        scan_cards.append(scan_card)
+    
+    return scan_cards
+
+
+# =============================================================================
+# INTERFAZ DE USUARIO
+# =============================================================================
+
+st.title("🧬 Motor de Consolidación de Reportes Biotech")
+st.markdown("""
+Esta aplicación permite cargar archivos de datos (CSV o JSON) y consolidarlos 
+en un reporte estructurado basado en una plantilla maestra institucional.
+""")
+
+st.divider()
+
+# Crear tres columnas para los cargadores
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.subheader("📚 Módulo 1: Aprendizajes")
+    archivo_aprendizajes = st.file_uploader(
+        "Datos de Aprendizajes e Insights",
+        type=["csv", "json"],
+        key="uploader_aprendizajes",
+        help="Archivo CSV o JSON con datos de capítulos, insights y tendencias"
+    )
+
+with col2:
+    st.subheader("🔮 Módulo 2: Escenarios")
+    archivo_escenarios = st.file_uploader(
+        "Datos de Escenarios Plausibles",
+        type=["csv", "json"],
+        key="uploader_escenarios",
+        help="Archivo CSV o JSON con escenarios, líneas de tiempo y análisis STEEP"
+    )
+
+with col3:
+    st.subheader("📋 Módulo 3: Referencias")
+    archivo_scan_cards = st.file_uploader(
+        "Datos de Documentos / Scan Cards",
+        type=["csv", "json"],
+        key="uploader_scan_cards",
+        help="Archivo CSV o JSON con referencias documentales y fuentes"
+    )
+
+st.divider()
+
+# Estado de sesión para almacenar resultado procesado
+if 'resultado_procesado' not in st.session_state:
+    st.session_state.resultado_procesado = None
+if 'mensaje_error' not in st.session_state:
+    st.session_state.mensaje_error = None
+
+
+def procesar_todo():
+    """
+    Función principal de procesamiento que se ejecuta al hacer clic en el botón.
+    """
+    try:
+        # Crear copia profunda del molde maestro
+        resultado = copy.deepcopy(MOLDE_MAESTRO)
+        
+        # Procesar Módulo 1: Aprendizajes
+        if archivo_aprendizajes is not None:
+            nombre = archivo_aprendizajes.name
+            tipo = nombre.split('.')[-1].lower()
+            datos = procesar_archivo(archivo_aprendizajes, tipo)
+            
+            if datos is not None:
+                aprendizajes = procesar_modulo_aprendizajes(datos)
+                resultado["aprendizajes"] = aprendizajes
+                st.success(f"✅ Módulo 1 procesado: {len(aprendizajes)} capítulos cargados")
+            else:
+                st.warning("⚠️ Módulo 1: Error al procesar archivo")
+        else:
+            st.info("ℹ️ Módulo 1: No se cargó archivo, se mantiene plantilla base")
+        
+        # Procesar Módulo 2: Escenarios
+        if archivo_escenarios is not None:
+            nombre = archivo_escenarios.name
+            tipo = nombre.split('.')[-1].lower()
+            datos = procesar_archivo(archivo_escenarios, tipo)
+            
+            if datos is not None:
+                escenarios = procesar_modulo_escenarios(datos)
+                resultado["escenarios"] = escenarios
+                st.success(f"✅ Módulo 2 procesado: {len(escenarios)} escenarios cargados")
+            else:
+                st.warning("⚠️ Módulo 2: Error al procesar archivo")
+        else:
+            st.info("ℹ️ Módulo 2: No se cargó archivo, se mantiene plantilla base")
+        
+        # Procesar Módulo 3: Scan Cards
+        if archivo_scan_cards is not None:
+            nombre = archivo_scan_cards.name
+            tipo = nombre.split('.')[-1].lower()
+            datos = procesar_archivo(archivo_scan_cards, tipo)
+            
+            if datos is not None:
+                scan_cards = procesar_modulo_scan_cards(datos)
+                resultado["scan-cards"] = scan_cards
+                st.success(f"✅ Módulo 3 procesado: {len(scan_cards)} referencias cargadas")
+            else:
+                st.warning("⚠️ Módulo 3: Error al procesar archivo")
+        else:
+            st.info("ℹ️ Módulo 3: No se cargó archivo, se mantiene plantilla base")
+        
+        # Actualizar metadata
+        from datetime import datetime
+        resultado["metadata"]["fecha_generacion"] = datetime.now().strftime("%Y-%m-%d")
+        
+        # Guardar en sesión
+        st.session_state.resultado_procesado = resultado
+        st.session_state.mensaje_error = None
+        
+    except Exception as e:
+        st.session_state.mensaje_error = f"Error crítico en procesamiento: {str(e)}"
+        st.session_state.resultado_procesado = None
+        st.error(st.session_state.mensaje_error)
+
+
+# Botón de procesamiento
+st.subheader("⚙️ Procesamiento")
+col_btn1, col_btn2 = st.columns([1, 4])
+
+with col_btn1:
+    btn_procesar = st.button(
+        "Procesar y Unificar Todo",
+        type="primary",
+        use_container_width=True
+    )
+
+if btn_procesar:
+    procesar_todo()
+
+st.divider()
+
+# Sección de descarga
+st.subheader("📥 Descarga del Reporte")
+
+if st.session_state.resultado_procesado is not None:
+    # Convertir a JSON con ensure_ascii=False para preservar caracteres especiales
+    json_output = json.dumps(
+        st.session_state.resultado_procesado,
+        ensure_ascii=False,
+        indent=4
     )
     
-    # Inyectar estilos CSS personalizados
-    inyectar_estilos_css()
-    
-    # Encabezado con logo (opcional - se puede agregar un logo de Icesi si existe)
-    st.markdown("""
-    <div style="text-align: center; margin-bottom: 2rem;">
-        <h1 style="color: #325BBD; font-size: 2.5rem; font-weight: 700;">
-             Herramienta de Transformación de Datos (ETL)
-        </h1>
-        <p style="color: #8A8D8F; font-size: 1.1rem; max-width: 800px; margin: 0 auto;">
-            Esta aplicación permite cargar un archivo CSV jerárquico y transformarlo en una estructura JSON anidada,
-            utilizando una plantilla JSON base integrada directamente en el código.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Barra lateral con instrucciones
-    with st.sidebar:
-        # Mostrar logo de innlab
-        try:
-            st.image("innlab-logo.svg", width=400, clamp=True)
-            st.markdown("<div style='text-align: center; margin-bottom: 1rem;'><p style='color: #8A8D8F; font-size: 0.85rem;'><strong>InnLab</strong> - Universidad Icesi</p></div>", unsafe_allow_html=True)
-        except:
-            # Si no se encuentra el logo, mostrar texto alternativo
-            st.markdown("""
-            <div style="text-align: center; margin-bottom: 1.5rem;">
-                <h3 style="color: #325BBD; font-size: 1.5rem; font-weight: 700; margin: 0;">
-                    InnLab
-                </h3>
-                <p style="color: #8A8D8F; font-size: 0.85rem; margin: 0.25rem 0 0 0;">
-                    Universidad Icesi
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div style="text-align: center; margin-bottom: 1.5rem;">
-            <h2 style="color: #325BBD; border-bottom: 2px solid #325BBD; padding-bottom: 0.5rem;">
-                 Instrucciones
-            </h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        1. **Cargar CSV**: Sube el archivo CSV con los datos a transformar.
-        2. **Procesar**: Haz clic en el botón para procesar los datos.
-        3. **Descargar**: Obtén el archivo JSON resultante.
-        """)
-        
-        st.markdown("""
-        <div style="text-align: center; margin: 2rem 0;">
-            <h3 style="color: #325BBD; border-bottom: 2px solid #325BBD; padding-bottom: 0.5rem;">
-                ℹ️ Información
-            </h3>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        - **Encoding**: UTF-8 con detección de BOM
-        - **Formato CSV**: Delimitado por comas
-        - **Columnas requeridas**: 
-          - `Capitulo`
-          - `subsección`
-          - `Contenido_Generado`
-        """)
-        
-        st.markdown("""
-        <div style="text-align: center; margin: 2rem 0;">
-            <h3 style="color: #325BBD; border-bottom: 2px solid #325BBD; padding-bottom: 0.5rem;">
-                📄 Plantilla Integrada
-            </h3>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.info("""
-        La plantilla JSON base con metadatos, configuración, autores y estructura estática 
-        ya viene integrada en la aplicación. Solo necesitas proporcionar los datos dinámicos 
-        a través del archivo CSV.
-        """)
-    
-    # Cargador único de archivo CSV
-    st.markdown("""
-    <div style="background-color: #F8F9FA; border: 2px dashed #8A8D8F; border-radius: 12px; padding: 2rem; margin: 2rem 0;">
-        <h2 style="color: #325BBD; text-align: center; margin-bottom: 1rem;">
-             Cargar Archivo CSV de Datos
-        </h2>
-        <p style="color: #8A8D8F; text-align: center; margin-bottom: 1.5rem;">
-            Arrastra o selecciona tu archivo CSV aquí
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    archivo_csv = st.file_uploader(
-        "Selecciona tu archivo CSV",
-        type=['csv'],
-        help="Archivo CSV con la estructura de capítulos y contenidos (ej: Biotech_ESTRUCTURA_CAPITULOS_COMPLETO.csv)"
-    )
-    
-    # Estado de sesión para almacenar resultados
-    if 'resultado_transformacion' not in st.session_state:
-        st.session_state.resultado_transformacion = None
-    if 'json_salida' not in st.session_state:
-        st.session_state.json_salida = None
-    
-    # Botón de procesamiento (solo habilitado si hay CSV)
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    with col_btn2:
-        boton_procesar = st.button(
-            "Procesar y Generar",
-            type="primary",
-            disabled=archivo_csv is None,
+    col_dl1, col_dl2 = st.columns([1, 4])
+    with col_dl1:
+        st.download_button(
+            label="📄 Descargar JSON",
+            data=json_output,
+            file_name="reporte_biotech_consolidado.json",
+            mime="application/json",
             use_container_width=True
         )
     
-    # Procesar transformación
-    if boton_procesar and archivo_csv:
-        try:
-            with st.spinner("Procesando datos..."):
-                # Usar la plantilla base integrada
-                plantilla_json = PLANTILLA_BASE_JSON
-                
-                # Leer CSV (primero decodificar a string)
-                csv_content = archivo_csv.getvalue().decode('utf-8-sig')
-                
-                # Procesar CSV
-                capitulos_data = procesar_csv(csv_content)
-                
-                # Construir estructura de aprendizajes
-                aprendizajes = construir_estructura_aprendizajes(capitulos_data)
-                
-                # Inyectar en plantilla
-                resultado = inyectar_en_plantilla(plantilla_json, aprendizajes)
-                
-                # Convertir a JSON string
-                json_salida = json.dumps(resultado, ensure_ascii=False, indent=2)
-                
-                # Guardar en sesión
-                st.session_state.resultado_transformacion = resultado
-                st.session_state.json_salida = json_salida
-                
-                # Mostrar resumen
-                st.success("✅ Transformación completada exitosamente!")
-                
-                # Mostrar estadísticas
-                st.markdown("""
-                <div style="margin: 2rem 0;">
-                    <h3 style="color: #325BBD; text-align: center; margin-bottom: 1.5rem;">
-                        Estadísticas del Procesamiento
-                    </h3>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col_est1, col_est2, col_est3, col_est4 = st.columns(4)
-                with col_est1:
-                    st.metric("Capítulos", len(aprendizajes))
-                with col_est2:
-                    total_insights = sum(len(cap.get('insights', [])) for cap in aprendizajes)
-                    st.metric("Insights", total_insights)
-                with col_est3:
-                    total_tendencias = sum(len(cap.get('tendencias', [])) for cap in aprendizajes)
-                    st.metric("Tendencias", total_tendencias)
-                with col_est4:
-                    total_scans = sum(len(cap.get('scan_cards', [])) for cap in aprendizajes)
-                    st.metric("Scan Cards", total_scans)
-                
-        except Exception as e:
-            st.error(f"❌ Error durante la transformación: {str(e)}")
-            st.exception(e)
+    st.success("✅ Los archivos se procesaron y ensamblaron exitosamente.")
     
-    # Mostrar vista previa y botón de descarga
-    if st.session_state.json_salida:
-        st.markdown("<hr>", unsafe_allow_html=True)
+    # Mostrar resumen estadístico
+    with st.expander("📊 Resumen Estadístico del Reporte"):
+        resumen = {
+            "Capítulos de Aprendizajes": len(st.session_state.resultado_procesado.get("aprendizajes", [])),
+            "Escenarios Plausibles": len(st.session_state.resultado_procesado.get("escenarios", [])),
+            "Referencias / Scan Cards": len(st.session_state.resultado_procesado.get("scan-cards", [])),
+            "Términos en Glosario": len(st.session_state.resultado_procesado.get("glosario", {}).get("terminos", []))
+        }
+        st.json(resumen)
         
-        # Sección de descarga (ahora arriba)
-        st.markdown("""
-        <div style="margin: 2rem 0;">
-            <h3 style="color: #325BBD; text-align: center; margin-bottom: 1.5rem;">
-                Descarga del Archivo JSON
-            </h3>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Botón de descarga centrado y destacado
-        col_dl1, col_dl2, col_dl3 = st.columns([1, 2, 1])
-        with col_dl2:
-            st.download_button(
-                label="📥 Descargar JSON",
-                data=st.session_state.json_salida,
-                file_name="info_consolidada_ACTUALIZADO.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        
-        # Advertencia sobre encoding
-        st.info("""
-        **Nota**: El archivo se descarga con encoding UTF-8 para garantizar la correcta visualización 
-        de caracteres especiales del español (tildes, ñ, etc.).
-        """)
-        
-        # Vista previa del JSON (ahora abajo y expandida por defecto)
-        st.markdown("""
-        <div style="margin: 2rem 0;">
-            <h3 style="color: #325BBD; text-align: center; margin-bottom: 1.5rem;">
-                Vista Previa del JSON Generado
-            </h3>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Mostrar JSON directamente (sin expander, siempre visible)
-        st.json(st.session_state.resultado_transformacion)
-        
-        
+        # Vista previa de la estructura
+        st.subheader("Vista Previa de Estructura")
+        estructura_preview = {
+            "portada": "✓ Sección completa",
+            "tabla-contenidos": "✓ Sección completa",
+            "ficha-tecnica-1": "✓ Sección completa",
+            "resumen-ejecutivo": "✓ Sección completa",
+            "introduccion": "✓ Sección completa",
+            "aprendizajes": f"✓ {len(st.session_state.resultado_procesado.get('aprendizajes', []))} capítulos",
+            "escenarios": f"✓ {len(st.session_state.resultado_procesado.get('escenarios', []))} escenarios",
+            "glosario": f"✓ {len(st.session_state.resultado_procesado.get('glosario', {}).get('terminos', []))} términos",
+            "scan-cards": f"✓ {len(st.session_state.resultado_procesado.get('scan-cards', []))} referencias",
+            "anexos": "✓ Sección completa",
+            "metadata": "✓ Actualizada"
+        }
+        for seccion, estado in estructura_preview.items():
+            st.text(f"  {seccion:30s} → {estado}")
 
-if __name__ == "__main__":
-    main()
+elif st.session_state.mensaje_error:
+    st.error(f"❌ {st.session_state.mensaje_error}")
+else:
+    st.info("👆 Cargue archivos y presione 'Procesar y Unificar Todo' para comenzar.")
+
+# =============================================================================
+# PIE DE PÁGINA
+# =============================================================================
+st.divider()
+st.markdown("""
+<div style='text-align: center; color: gray; font-size: 0.9em;'>
+    <p>Motor de Consolidación de Reportes Biotech v1.0</p>
+    <p>Centro de Estudios en Biotecnología y Futuros Estratégicos</p>
+</div>
+""", unsafe_allow_html=True)
